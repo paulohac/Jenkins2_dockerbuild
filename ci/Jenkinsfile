@@ -1,0 +1,53 @@
+pipeline {
+  agent any
+  stages {
+    
+    stage('Build Image') {
+     steps {
+      sh 'printenv'
+      sh 'docker build --tag javaproject:latest -f ci/Dockerfile .'
+      sh 'docker run -d javaproject:latest sleep 20'
+      sh 'docker cp $(docker ps -aq --filter ancestor=javaproject:latest):path/inside/container/toartifact.war .'
+      sh 'unzip -o artifact.war'
+     }
+    }
+
+    stage('Deploy') {
+     steps {
+      script {
+       if (env.BRANCH_NAME ==~ /prd(.*)/){
+        echo 'deploying in Production'
+        sh 'docker run --rm javaproject:latest /code/ci/deploy.sh ${JBOSSADMINPRD_HOST} ${JBOSSADMINPRD_PORTA}  ${JBOSSADMINPRD_USR} ${JBOSSADMINPRD_PSW}'
+       }else {
+        echo 'deploying in Staging'
+         sh 'docker run --rm javaproject:latest /code/ci/deploy.sh ${JBOSSADMIN_HOST} ${JBOSSADMIN_PORTA} ${JBOSSADMIN_USR} ${JBOSSADMIN_PSW}'
+       }
+      }
+     }
+    }
+    
+    stage('Clear Workspace') {
+     steps {
+      cleanWs(cleanWhenAborted: false, cleanWhenFailure: false, cleanWhenNotBuilt: true, cleanWhenSuccess: true, deleteDirs: true)
+     }
+    }
+   }
+   
+ environment {
+  JBOSSADMINPRD_HOST = 'sistemajava.example.com.br'
+  JBOSSADMINPRD_PORTA = '9990'
+  JBOSSADMINPRD = credentials('sistemajava_jbossadmin_prd')
+  JBOSSADMIN_HOST = 'sistemajavastaging.example.com.br'
+  JBOSSADMIN_PORTA = '3591'
+  JBOSSADMIN = credentials('sistemajavastaging_jbossadmin')
+ }
+ 
+ post {
+  failure {
+   sh "send_build_fail ${params.supervisor_email} ${params.builder} ${BUILD_ID} ${JOB_NAME} ${params.environment}"
+  }
+  success {
+   sh "send_build_success ${params.supervisor_email} ${params.builder} ${BUILD_ID} ${JOB_NAME} ${params.environment}"
+  }
+ }
+}
